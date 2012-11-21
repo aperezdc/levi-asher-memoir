@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from HTMLParser import HTMLParser
-from os import path
+from os import path, listdir
 import sys
 
 
@@ -193,9 +193,9 @@ class Detox(GenParser):
             self.append("<img src=\"img/")
             self.append(srcpath[-1])
             if "alt" in attr:
-                self.append(" alt=\"%s\"/>" % attr["alt"])
+                self.append("\" alt=\"%s\"/>" % attr["alt"])
             else:
-                self.append(" />");
+                self.append("\" />");
 
     def handle_br_start(self, attr):
         self.append("<br/>")
@@ -228,9 +228,21 @@ def opf_toc_itemrefs(item_ids):
     return "\n".join(items)
 
 
+_IMG_MIMETYPE = {
+    "jpg" : "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png" : "image/png",
+    "gif" : "image/gif",
+}
+
 def opf_manifest(item_ids):
-    items = ("<item id=\"%s\" href=\"%s.xhtml\" media-type=\"text/xhtml+xml\"/>"
-             % (i, i) for i in item_ids)
+    items = ["<item id=\"%s\" href=\"%s.xhtml\" media-type=\"text/xhtml+xml\"/>"
+             % (i, i) for i in item_ids]
+
+    for name in listdir(path.join(path.dirname(__file__), "OEBPS", "img")):
+        ext = name.split(".")[-1]
+        items.append("<item id=\"img-%s\" href=\"img/%s\" media-type=\"%s\"/>"
+                     % (name, name, _IMG_MIMETYPE.get(ext, "image/jpeg")))
     return "\n".join(items)
 
 
