@@ -210,6 +210,16 @@ class Detox(GenParser):
         else:
             self.append("<br/>")
 
+    def handle_pre_start(self, attr):
+        self.append("\n")
+        self.append("<pre>")
+
+    def handle_pre_end(self, attr):
+        if self.appending and self.content[-1] == "<pre>":
+            del self.content[-1]
+        else:
+            self.append("</pre>")
+
     def handle_charref(self, name):
         self.append(charref_table.get(name, "&%s;" % name))
 
