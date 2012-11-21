@@ -69,17 +69,15 @@ class GenParser(HTMLParser, object):
                 # any callback.
                 return
 
-            tagindex += 1
             for tag, attr in reversed(self.stack[tagindex:]):
                 # Item found: pop all items calling their callbacks
                 # and remove them from the stack
                 self.handle_endtag(tag)
             del self.stack[tagindex:]
-
-
-        f = getattr(self, "handle_%s_end" % tag, None)
-        if f is not None: f(self.stack[-1][1])
-        del self.stack[-1]
+        else:
+            f = getattr(self, "handle_%s_end" % tag, None)
+            if f is not None: f(self.stack[-1][1])
+            del self.stack[-1]
 
 
 class LinkGrabber(GenParser):
@@ -130,9 +128,7 @@ class Detox(GenParser):
             return
 
         if not self.in_paragraph:
-            self.content.append("<p>")
-            self.in_paragraph = True
-
+            self.handle_starttag("p", ())
         self.content.append(c)
 
     def handle_article_start(self, attr):
@@ -161,13 +157,14 @@ class Detox(GenParser):
 
     def handle_p_start(self, attr):
         self.in_paragraph = self.article
+        self.append("\n")
         self.append("<p>")
 
     def handle_p_end(self, attr):
         if self.appending and self.content[-1] == "<p>":  # Avoid empty paragraphs
             del self.content[-1]
         else:
-            self.append("</p>\n")
+            self.append("</p>")
         self.in_paragraph = False
 
     def handle_i_start(self, attr):
@@ -209,7 +206,7 @@ class Detox(GenParser):
         if self.appending and self.content[-1] == "<br/>":
             # Double-linebreak in some documents signals end of paragraph
             del self.content[-1]
-            self.append("</p>\n")
+            self.append("</p>")
         else:
             self.append("<br/>")
 
@@ -227,12 +224,18 @@ def cmd_chapter_links(argv):
         print href
 
 
+def line_filter(line):
+    line = line.lower().strip()
+    return ("this article is part of the <strong>the memoir</strong> series." not in line
+        and "(this is chapter " not in line)
+
+
 def cmd_html_detox(argv):
     parser = Detox()
     [parser.feed(data) for data in sys.stdin]
     print EPUB_CH_START % parser.title,
     lines = "".join(parser.content).splitlines()
-    print "\n".join(lines[1:])
+    print "\n".join(filter(line_filter, lines[2:-2]))
     print EPUB_CH_END
 
 
@@ -253,7 +256,7 @@ def opf_manifest(item_ids):
              % (i, i) for i in item_ids]
 
     for name in listdir(path.join(path.dirname(__file__), "OEBPS", "img")):
-        ext = name.split(".")[-1]
+        ext = name.split(".")[-1].lower()
         items.append("<item id=\"img-%s\" href=\"img/%s\" media-type=\"%s\"/>"
                      % (name, name, _IMG_MIMETYPE.get(ext, "image/jpeg")))
     return "\n".join(items)
