@@ -14,3 +14,15 @@ To build the output ``memoir.epub`` file, run::
 
   make download && make
 
+
+Requirements
+============
+
+If you are running a decent Unix-like system, most likely you will already
+have those (or easilt available in your package manager):
+
+* GNU Make.
+* ``wget``
+* Python 2.x
+* Command line ``zip`` tool from Info-Zip.
+
