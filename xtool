@@ -1,0 +1,291 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from HTMLParser import HTMLParser
+from os import path
+import sys
+
+
+charref_table = {
+    "145": "'",
+    "146": "'",
+    "149": u"í".encode("latin1"),
+    "151": " ",
+
+    # Those are strange things that is better to ignore
+    "01" : "",
+    "19" : "",
+    "20" : "",
+    "21" : "",
+}
+entityref_table = {
+    "quot": "\"",
+    "nbsp": " ",
+    "amp" : "&amp;",
+    "lt"  : "&lt;",
+    "gt"  : "&gt;",
+}
+
+
+EPUB_CH_START = """\
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+ <head>
+  <meta http-equiv="Content-Type" content="application/xhtml+xml; charset=utf-8" />
+  <title>%s</title>
+ </head>
+ <body>
+"""
+EPUB_CH_END = """\
+ </body>
+</html>
+"""
+
+
+class GenParser(HTMLParser, object):
+    def __init__(self):
+        super(GenParser, self).__init__()
+        self.stack = []
+
+    def handle_starttag(self, tag, attr):
+        attr = dict(attr)
+        self.stack.append((tag, attr))
+        f = getattr(self, "handle_%s_start" % tag, None)
+        if f is not None: f(attr)
+
+    def handle_endtag(self, tag):
+        if self.stack[-1][0] != tag:
+            # Try to fix up b0rked HTML
+            tagindex = None
+            for i in reversed(xrange(len(self.stack))):
+                if self.stack[i][0] == tag:
+                    tagindex = i
+                    break
+
+            if tagindex is None:
+                # No tag found in the stack, still we get a close tag...
+                # Assume the tag was not ever opened, and do not call
+                # any callback.
+                return
+
+            tagindex += 1
+            for tag, attr in reversed(self.stack[tagindex:]):
+                # Item found: pop all items calling their callbacks
+                # and remove them from the stack
+                self.handle_endtag(tag)
+            del self.stack[tagindex:]
+
+
+        f = getattr(self, "handle_%s_end" % tag, None)
+        if f is not None: f(self.stack[-1][1])
+        del self.stack[-1]
+
+
+class LinkGrabber(GenParser):
+    def __init__(self):
+        super(LinkGrabber, self).__init__()
+        self.links = []
+        self.cur_href = None
+        self.cur_text = None
+
+    def handle_a_start(self, attr):
+        if "href" in attr:
+            self.cur_href = attr["href"]
+            self.cur_text = []
+
+    def handle_a_end(self, attr):
+        if self.cur_href and self.cur_text:
+            text = "".join(self.cur_text)
+            if text.startswith("Chapter "):
+                self.links.append((text, self.cur_href))
+        self.cur_href = self.cur_text = None
+
+    def handle_data(self, data):
+        if self.cur_href:
+            self.cur_text.append(data)
+
+
+class Detox(GenParser):
+    def __init__(self):
+        super(Detox, self).__init__()
+        self.content = None
+        self.grab = True
+        self.title = None
+        self.article = False
+        self.in_paragraph = False
+
+    @property
+    def appending(self):
+        return self.in_paragraph and self.grab and self.content is not None
+
+    def append(self, c):
+        if self.title is True:
+            if c.lower().endswith(" | literary kicks"):
+                c = c[:-len(" | literary kicks")]
+            self.title = c.title()
+        elif self.appending:
+            self.content.append(c)
+
+    def handle_article_start(self, attr):
+        self.article = True
+
+    def handle_article_end(self, attr):
+        self.article = False
+
+    def handle_div_start(self, attr):
+        if not self.article:
+            return
+        if "class" in attr and "content" in attr["class"].split():
+            self.content = []
+            self.grab = True
+
+    def handle_div_end(self, attr):
+        if "class" in attr and "content" in attr["class"].split():
+            self.grab = False
+
+    def handle_title_start(self, attr):
+        self.title = True
+
+    def handle_data(self, data):
+        if data:
+            self.append(data)
+
+    def handle_p_start(self, attr):
+        self.in_paragraph = self.article
+        self.append("<p>")
+
+    def handle_p_end(self, attr):
+        if self.appending and self.content[-1] == "<p>":  # Avoid empty paragraphs
+            del self.content[-1]
+        else:
+            self.append("</p>\n")
+        self.in_paragraph = False
+
+    def handle_i_start(self, attr):
+        self.append("<em>")
+
+    def handle_i_end(self, attr):
+        if self.appending and self.content[-1] == "<em>":  # Avoid empty tags
+            del self.content[-1]
+        else:
+            self.append("</em>")
+
+    handle_em_start = handle_i_start
+    handle_em_end   = handle_i_end
+
+    def handle_b_start(self, attr):
+        self.append("<strong>")
+
+    def handle_b_end(self, attr):
+        if self.appending and self.content[-1] == "<strong>":  # Avoid empty tags
+            del self.content[-1]
+        else:
+            self.append("</strong>")
+
+    handle_strong_start = handle_b_start
+    handle_strong_end   = handle_b_end
+
+    def handle_img_start(self, attr):
+        if self.appending and "src" in attr:
+            srcpath = attr["src"].split("/")
+            self.append("<!-- img: %s -->" % attr["src"])
+            self.append("<img src=\"img/")
+            self.append(srcpath[-1])
+            if "alt" in attr:
+                self.append(" alt=\"%s\"/>" % attr["alt"])
+            else:
+                self.append(" />");
+
+    def handle_br_start(self, attr):
+        self.append("<br/>")
+
+    def handle_charref(self, name):
+        self.append(charref_table.get(name, "&%s;" % name))
+
+    def handle_entityref(self, name):
+        self.append(entityref_table.get(name, "&%s;" % name))
+
+
+def cmd_chapter_links(argv):
+    parser = LinkGrabber()
+    [parser.feed(data) for data in sys.stdin]
+    for text, href in parser.links:
+        print href
+
+
+def cmd_html_detox(argv):
+    parser = Detox()
+    [parser.feed(data) for data in sys.stdin]
+    print EPUB_CH_START % parser.title,
+    lines = "".join(parser.content).splitlines()
+    print "\n".join(lines[1:])
+    print EPUB_CH_END
+
+
+def opf_toc_itemrefs(item_ids):
+    items = ("<itemref idref=\"%s\" />" % i for i in item_ids)
+    return "\n".join(items)
+
+
+def opf_manifest(item_ids):
+    items = ("<item id=\"%s\" href=\"%s.xhtml\" media-type=\"text/xhtml+xml\"/>"
+             % (i, i) for i in item_ids)
+    return "\n".join(items)
+
+
+def ncx_nav_points(ids, titles):
+    assert len(ids) == len(titles)
+    items = (("<navPoint class=\"chapter\" id=\"%s\" playOrder=\"%i\">"
+              "<navLabel><text>%s</text></navLabel>"
+              "<content src=\"%s.xhtml\" />"
+              "</navPoint>") % (ids[i], i+1, titles[i], ids[i])
+             for i in xrange(len(titles)))
+    return "\n".join(items)
+
+
+def cmd_expand_template(argv):
+    if len(argv) != 1:
+        raise SystemExit("Usage: xtool expand-template indexfile < in > out")
+
+    links = None
+    with file(argv[0], "rU") as indexfd:
+        parser = LinkGrabber()
+        [parser.feed(data) for data in indexfd]
+        links = parser.links
+
+    itemidlist = [href.split("/")[-1] for _, href in links]
+    chaptitles = [text.title() for text, _ in links]
+
+    expandvars = {
+        "BOOK_TITLE"      : "The Memoir",
+        "BOOK_AUTHOR"     : "Levi Asher",
+        "OPF_MANIFEST"    : opf_manifest(itemidlist),
+        "NCX_NAV_POINTS"  : ncx_nav_points(itemidlist, chaptitles),
+        "OPF_TOC_ITEMREFS": opf_toc_itemrefs(itemidlist),
+    }
+
+    from string import Template
+    print Template(sys.stdin.read()).safe_substitute(expandvars)
+
+
+if __name__ == "__main__":
+    def usage():
+        print >> sys.stderr, "Usage:", sys.argv[0], "command [command-args..]"
+        print >> sys.stderr, "Available commands:"
+        for name in globals().keys():
+            if name.startswith("cmd_"):
+                print >> sys.stderr, " -", name[4:].replace("_", "-")
+        raise SystemExit(1)
+
+    if len(sys.argv) < 2:
+        usage()
+
+    cmdname = "cmd_" + sys.argv[1].replace("-", "_")
+    if not cmdname in globals():
+        usage()
+
+    cmdfunc = globals()[cmdname]
+    cmdfunc(sys.argv[2:])
+
+
