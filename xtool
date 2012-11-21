@@ -117,15 +117,23 @@ class Detox(GenParser):
 
     @property
     def appending(self):
-        return self.in_paragraph and self.grab and self.content is not None
+        return self.grab and self.content is not None
 
     def append(self, c):
         if self.title is True:
             if c.lower().endswith(" | literary kicks"):
                 c = c[:-len(" | literary kicks")]
             self.title = c.title()
-        elif self.appending:
-            self.content.append(c)
+            return
+
+        if not self.appending:
+            return
+
+        if not self.in_paragraph:
+            self.content.append("<p>")
+            self.in_paragraph = True
+
+        self.content.append(c)
 
     def handle_article_start(self, attr):
         self.article = True
@@ -148,7 +156,7 @@ class Detox(GenParser):
         self.title = True
 
     def handle_data(self, data):
-        if data:
+        if data and data.strip():
             self.append(data)
 
     def handle_p_start(self, attr):
@@ -198,7 +206,12 @@ class Detox(GenParser):
                 self.append("\" />");
 
     def handle_br_start(self, attr):
-        self.append("<br/>")
+        if self.appending and self.content[-1] == "<br/>":
+            # Double-linebreak in some documents signals end of paragraph
+            del self.content[-1]
+            self.append("</p>\n")
+        else:
+            self.append("<br/>")
 
     def handle_charref(self, name):
         self.append(charref_table.get(name, "&%s;" % name))
