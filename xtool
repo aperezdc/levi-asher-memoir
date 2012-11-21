@@ -220,6 +220,16 @@ class Detox(GenParser):
         else:
             self.append("</pre>")
 
+    def handle_a_start(self, attr):
+        if "href" in attr and not attr["href"].startswith("#"):
+            self.append("<a href=\"%s\">" % attr["href"])
+
+    def handle_a_end(self, attr):
+        if self.appending and self.content[-1].startswith("<a href="):
+            del self.content[-1]
+        else:
+            self.append("</a>")
+
     def handle_charref(self, name):
         self.append(charref_table.get(name, "&%s;" % name))
 
