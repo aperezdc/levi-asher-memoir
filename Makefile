@@ -8,12 +8,19 @@ MAKEFLAGS += s
 ifneq (,$(strip $(ALL_HTML)))
 ALL_XHTML := $(patsubst data/%.html,OEBPS/%.xhtml,$(ALL_HTML))
 
+all: memoir.epub
+
+xhtml: $(ALL_XHTML)
+.PHONY: xhtml
+
 memoir.epub: mimetype $(ALL_INX) $(ALL_XHTML) data/image-download-done
 	zip -0 $@.zip mimetype
 	zip -9r $@.zip META-INF OEBPS
 	mv $@.zip $@
 
 .INTERMEDIATE: memoir.epub.zip
+else
+all: download
 endif
 
 download: download-chapters
