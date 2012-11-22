@@ -252,6 +252,9 @@ def line_filter(line):
 
 def cmd_html_detox(argv):
     parser = Detox()
+    if len(argv) and argv[0] == "no-images":
+        parser.handle_img_start = parser.handle_img_end = None
+
     [parser.feed(data) for data in sys.stdin]
     print EPUB_CH_START % parser.title,
     lines = "".join(parser.content).splitlines()

@@ -5,6 +5,12 @@ ALL_IN    := $(wildcard *.in)
 ALL_INX   := $(patsubst %.in,OEBPS/%,$(ALL_IN))
 MAKEFLAGS += s
 
+IMAGES    ?= 1
+
+ifneq ($(strip $(IMAGES)),1)
+DETOX_OPT := no-images
+endif
+
 ifneq (,$(strip $(ALL_HTML)))
 ALL_XHTML := $(patsubst data/%.html,OEBPS/%.xhtml,$(ALL_HTML))
 
@@ -66,7 +72,7 @@ mrproper: clean
 OEBPS/%.xhtml: data/%.html
 	echo "html-detox: $@"
 	mkdir -p $(@D)
-	./xtool html-detox < $< > $@
+	./xtool html-detox $(DETOX_OPT) < $< > $@
 
 OEBPS/%: %.in data/index.html data/image-download-done
 	echo "expand-template: $@"
