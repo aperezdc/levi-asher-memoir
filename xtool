@@ -212,6 +212,16 @@ class Detox(GenParser):
         else:
             self.append("<br/>")
 
+    def handle_blockquote_start(self, attr):
+        self.append("\n")
+        self.append("<blockquote>")
+
+    def handle_blockquote_end(self, attr):
+        if len(self.content) and self.content[-1] == "<blockquote>":
+            del self.content[-1]
+        else:
+            self.append("</blockquote>")
+
     def handle_pre_start(self, attr):
         self.append("\n")
         self.append("<pre>")
