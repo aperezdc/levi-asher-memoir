@@ -193,14 +193,16 @@ class Detox(GenParser):
 
     def handle_img_start(self, attr):
         if self.appending and "src" in attr:
-            srcpath = attr["src"].split("/")
+            imgname = attr["src"].split("/")[-1]
+            if "alt" not in attr:
+                if "title" in attr:
+                    attr["alt"] = attr["title"]
+                else:
+                    attr["alt"] = imgname
+
             self.append("<!-- img: %s -->" % attr["src"])
-            self.append("<img src=\"img/")
-            self.append(srcpath[-1])
-            if "alt" in attr:
-                self.append("\" alt=\"%s\"/>" % attr["alt"])
-            else:
-                self.append("\" />");
+            self.append("<img src=\"img/%s\" alt=\"%s\"/>"
+                        % (imgname, attr["alt"]))
 
     def handle_br_start(self, attr):
         if self.appending and self.content[-1] == "<br/>":
