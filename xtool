@@ -260,7 +260,7 @@ def cmd_html_detox(argv):
     [parser.feed(data) for data in sys.stdin]
     print EPUB_CH_START % parser.title,
     lines = "".join(parser.content).splitlines()
-    print "\n".join(filter(line_filter, lines[2:-2]))
+    print "\n".join(filter(line_filter, lines[3:-2]))
     print EPUB_CH_END
 
 
@@ -277,14 +277,15 @@ _IMG_MIMETYPE = {
 }
 
 def opf_manifest(item_ids):
-    items = ["<item id=\"%s\" href=\"%s.xhtml\" media-type=\"text/xhtml+xml\"/>"
+    print >> sys.stderr, "item_ids:", item_ids
+    items = ["<item id=\"%s\" href=\"%s.xhtml\" media-type=\"application/xhtml+xml\"/>"
              % (i, i) for i in item_ids]
 
     for name in listdir(path.join(path.dirname(__file__), "OEBPS", "img")):
         ext = name.split(".")[-1].lower()
         items.append("<item id=\"img-%s\" href=\"img/%s\" media-type=\"%s\"/>"
                      % (name, name, _IMG_MIMETYPE.get(ext, "image/jpeg")))
-    return "\n".join(items)
+    return "\n\t".join(items)
 
 
 def ncx_nav_points(ids, titles):
@@ -294,7 +295,7 @@ def ncx_nav_points(ids, titles):
               "<content src=\"%s.xhtml\" />"
               "</navPoint>") % (ids[i], i+1, titles[i], ids[i])
              for i in xrange(len(titles)))
-    return "\n".join(items)
+    return "\n\t".join(items)
 
 
 def cmd_expand_template(argv):
