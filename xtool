@@ -149,6 +149,12 @@ class Node(object):
             item.parent = self
         return self._content.append(item)
 
+    def insert(self, location, item):
+        assert isinstance(item, (Node, str, unicode))
+        if isinstance(item, Node):
+            item.parent = self
+        return self._content.insert(location, item)
+
     def extend(self, items):
         [self.append(item) for item in items]
 
@@ -473,8 +479,12 @@ def cmd_html_detox(argv):
 
     [parser.feed(data.decode("utf-8")) for data in sys.stdin]
 
-    print EPUB_CH_START % parser.title,
-    print parser.root.sanitized().flatten().encode("utf-8")
+    # Insert the title as <h1> at the beginning of the body
+    tree = parser.root.sanitized()
+    tree.insert(0, Node("h1", TextNode((parser.title,))))
+
+    print EPUB_CH_START % parser.title
+    print tree.flatten().encode("utf-8")
     print EPUB_CH_END
 
 def opf_toc_itemrefs(item_ids):
