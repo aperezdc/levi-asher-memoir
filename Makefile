@@ -1,11 +1,26 @@
 
 INDEX_URL := http://www.litkicks.com/AMemoirInProgress
+TIDY_OPT  := --output-xhtml yes \
+             --add-xml-decl no \
+             --add-xml-space no \
+             --doctype omit \
+             --drop-empty-elements yes \
+             --drop-empty-paras yes \
+             --drop-font-tags yes \
+             --drop-proprietary-attributes yes \
+             --merge-spans yes \
+             --merge-divs yes \
+             --show-warnings no \
+             --show-errors 0 \
+             --force-output yes \
+             --wrap 0
+
+
 ALL_HTML  := $(filter-out data/index.html,$(wildcard data/*.html))
 ALL_IN    := $(wildcard *.in)
 ALL_INX   := $(patsubst %.in,OEBPS/%,$(ALL_IN))
 MAKEFLAGS += s
 
-IMAGES    ?= 1
 
 ifneq ($(strip $(IMAGES)),1)
 DETOX_OPT := no-images
@@ -13,8 +28,11 @@ endif
 
 ifneq (,$(strip $(ALL_HTML)))
 ALL_XHTML := $(patsubst data/%.html,OEBPS/%.xhtml,$(ALL_HTML))
+ALL_TIDY  := $(patsubst %.html,%.html.tidy,$(ALL_HTML))
 
 all: memoir.epub
+
+tidy: $(ALL_TIDY)
 
 xhtml: $(ALL_XHTML)
 .PHONY: xhtml
@@ -59,23 +77,27 @@ data/index.html:
 
 clean:
 	echo "clean"
-	$(RM) $(ALL_XHTML) $(ALL_INX) memoir.epub
+	$(RM) $(ALL_XHTML) $(ALL_INX) $(ALL_TIDY) memoir.epub
 
 mrproper: clean
 	echo "mrproper"
 	$(RM) data/* OEBPS/img/*
 .PHONY: mrproper
 
+check: memoir.epub
+	epubcheck $<
+.PHONY: check
 
 ### Implicit rules
-
-OEBPS/%.xhtml: data/%.html
-	echo "html-detox: $@"
-	mkdir -p $(@D)
-	./xtool html-detox $(DETOX_OPT) < $< > $@
 
 OEBPS/%: %.in data/index.html data/image-download-done
 	echo "expand-template: $@"
 	mkdir -p $(@D)
 	./xtool expand-template data/index.html < $< > $@
+
+OEBPS/%.xhtml: data/%.html
+	echo "html-detox: $@"
+	mkdir -p "$(@D)"
+	tidy -f /dev/null -o $<.tidy $(TIDY_OPT) $< || true
+	./xtool html-detox $(DETOX_OPT) < $<.tidy > $@
 

@@ -25,4 +25,5 @@ have those (or easilt available in your package manager):
 * ``wget``
 * Python 2.x
 * Command line ``zip`` tool from Info-Zip.
+* HTML Tidy
 

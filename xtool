@@ -35,10 +35,8 @@ EPUB_CH_START = """\
   <meta http-equiv="Content-Type" content="application/xhtml+xml; charset=utf-8" />
   <title>%s</title>
  </head>
- <body>
 """
 EPUB_CH_END = """\
- </body>
 </html>
 """
 
@@ -104,149 +102,366 @@ class LinkGrabber(GenParser):
             self.cur_text.append(data)
 
 
-class Detox(GenParser):
-    def __init__(self):
-        super(Detox, self).__init__()
-        self.content = None
-        self.grab = True
-        self.title = None
-        self.article = False
-        self.in_paragraph = False
+from itertools import imap, takewhile
+
+
+class Node(object):
+    def __init__(self, tagname, content=(), **kw):
+        super(Node, self).__init__()
+        self._tagname = tagname
+        self._content = []
+        self.parent = None
+        self.attr = kw
+        self.extend(content)
+
+    def __repr__(self):
+        return "%s(%r, [%s])" % (self.__class__.__name__,
+                                 self._tagname,
+                                 ", ".join(map(repr, self)))
+
+    def flatten_content(self):
+        return u"".join((imap(lambda x: x.flatten() if isinstance(x, Node)
+                              else unicode(x), self)))
+
+    def flatten(self):
+        content_string = self.flatten_content()
+        attr_string = "".join((" %s='%s'" % (key, val)
+                               for key, val in self.attr.iteritems()))
+
+
+        if content_string is None:
+            return u"<%s%s/>" % (self._tagname, attr_string)
+        else:
+            return u"<%s%s>%s</%s>" % (self._tagname,
+                                       attr_string,
+                                       content_string,
+                                       self._tagname)
+
+    __contains__ = lambda self, item: item in self._content
+    __getitem__  = lambda self, idx: self._content[idx]
+    __len__      = lambda self: len(self._content)
+    __reversed__ = lambda self: reversed(self._content)
+    __iter__     = lambda self: iter(self._content)
+
+    def append(self, item):
+        assert isinstance(item, (Node, str, unicode))
+        if isinstance(item, Node):
+            item.parent = self
+        return self._content.append(item)
+
+    def insert(self, location, item):
+        assert isinstance(item, (Node, str, unicode))
+        if isinstance(item, Node):
+            item.parent = self
+        return self._content.insert(location, item)
+
+    def extend(self, items):
+        [self.append(item) for item in items]
+
+    def pop(self):
+        item = self._content.pop()
+        item.parent = None
+        return item
+
+    def clear(self):
+        for child in self:
+            child.parent = None
+        self._content = []
+
+    def remove(self, item):
+        self._content.remove(item)
+        item.parent = None
 
     @property
-    def appending(self):
-        return self.grab and self.content is not None
+    def tagname(self):
+        return self._tagname
 
-    def append(self, c):
-        if self.title is True:
-            if c.lower().endswith(" | literary kicks"):
-                c = c[:-len(" | literary kicks")]
-            self.title = c.title()
-            return
+    def has_parent(self, nodeclass=None):
+        if nodeclass is None:
+            return self.parent is not None
+        elif self.parent is None:
+            return False
+        elif isinstance(self.parent, nodeclass):
+            return True
+        else:
+            return self.parent.has_parent(nodeclass)
 
-        if not self.appending:
-            return
+    def instance_of(self, nodeclass, recursive=False):
+        return isinstance(self, nodeclass) or \
+                (recursive and self.has_parent(nodeclass))
 
-        if not self.in_paragraph:
-            self.handle_starttag("p", ())
-        self.content.append(c)
+    def sanitized_content(self):
+        # We have to use a list with the contents copied, to
+        # avoid an infinite loop when a sanitized() method
+        # modifies the parent's contents.
+        return (n for n in [node.sanitized() for node in self] if n is not None)
 
-    def handle_article_start(self, attr):
-        self.article = True
+    def sanitized(self):
+        return self.__class__(self._tagname, self.sanitized_content())
 
-    def handle_article_end(self, attr):
-        self.article = False
+
+class ConcreteNode(Node):
+    tagname = None
+
+    def __init__(self, content=()):
+        tagname = self.__class__.tagname
+        if tagname is None:
+            tagname = self.__class__.__name__
+            assert tagname.endswith("Node")
+            assert len(tagname) > 4
+            tagname = tagname[:-4].lower()
+        super(ConcreteNode, self).__init__(tagname, content)
+
+    def sanitized(self):
+        return GhostNode(self.sanitized_content())
+
+    def __repr__(self):
+        return "%s([%s])" % (self.__class__.__name__,
+                             ", ".join(imap(repr, self)))
+
+
+class EmptyNode(ConcreteNode):
+    def __init__(self, content=()):
+        super(EmptyNode, self).__init__()
+        self._content = ()
+
+    def flatten_content(self):
+        return None
+
+    def flatten(self):
+        return super(EmptyNode, self).flatten()
+
+
+class GhostNode(ConcreteNode):
+    tagname = "!ghost"
+
+    def flatten(self):
+        return self.flatten_content()
+
+
+class ANode(ConcreteNode):
+    def sanitized(self):
+        href = self.attr.get("href", None)
+        if href is None:
+            return GhostNode(self.sanitized_content())
+        else:
+            return ANode(self.sanitized_content(), href=href)
+
+
+class BlockquoteNode(ConcreteNode): pass
+class StrongNode(ConcreteNode): pass
+class EmNode(ConcreteNode): pass
+class SpanNode(GhostNode): pass
+class HrNode(EmptyNode): pass
+
+
+class BrNode(EmptyNode):
+    def sanitized(self):
+        if not self.parent:
+            return None
+
+        if not self.parent.instance_of(PNode, recursive=True):
+            return None
+
+        if len(self.parent):
+            last = self.parent[-1]
+            if isinstance(last, BrNode):
+                return None
+        return BrNode()
+
+
+class PNode(ConcreteNode):
+    def flatten_content(self):
+        content = super(PNode, self).flatten_content().strip()
+        if content.startswith("(This is chapter ") or \
+                content.endswith(" of the Internet industry.)"):
+                    return None
+        return content if len(content) > 0 else None
+
+    def sanitized(self):
+        if self.parent and self.parent.instance_of(PNode, recursive=True):
+            self.parent.extend(self.sanitized_content())
+            return None
+        newnode = PNode(self.sanitized_content())
+        # Make sure there are no dangling <br/> items at the end
+        while len(newnode) and isinstance(newnode[-1], BrNode):
+            newnode.pop()
+        return newnode
+
+    def flatten(self):
+        return "\n%s\n" % super(PNode, self).flatten()
+
+
+class ImgNode(Node):
+    def __init__(self, href, alt=None):
+        basename = href.split("/")[-1]
+        super(ImgNode, self).__init__("img", src="img/" + basename,
+                                      alt=(alt or basename))
+        self._href = href
+
+    def flatten_content(self):
+        return None
+
+    def flatten(self):
+        return u"%s<!-- img: %s -->" % (super(ImgNode, self).flatten(),
+                                        self._href)
+
+    def sanitized(self):
+        newnode = ImgNode(self._href, self.attr["alt"])
+        if not (self.parent and self.parent.instance_of(PNode, recursive=True)):
+            newnode = PNode((newnode,))
+        return newnode
+
+
+class TextNode(EmptyNode):
+    tagname = "!text"
+
+    def __init__(self, content=()):
+        super(TextNode, self).__init__()
+        if isinstance(content, (str, unicode)):
+            self._content = [content]
+        else:
+            self._content = list(content)
+
+    def flatten_content(self):
+        return u"".join(self)
+
+    flatten = flatten_content
+
+    def sanitized(self):
+        parent = self.parent
+        if parent and not parent.instance_of(PNode, recursive=True):
+            # Not inside a paragraph: split the parent's list of contents:
+            # generate a number of paragraphs, splitting at <br> items
+            i = iter(parent)
+            newcontents = []
+            while True:
+                pcontent = list(takewhile(lambda x: not isinstance(x, BrNode), i))
+                if len(pcontent):
+                    newcontents.append(PNode(pcontent).sanitized())
+                else:
+                    break
+            parent.clear()
+            parent.extend(newcontents)
+            return None
+
+        newnode = TextNode(self.sanitized_content())
+        if not (self.parent and self.parent.instance_of(PNode, recursive=True)):
+            newnode = PNode((newnode,))
+        if self.flatten_content().strip():
+            return newnode
+        else:
+            return None
+
+    def sanitized_content(self):
+        return iter(self._content)
+
+
+class Detox(GenParser):
+
+    inline_classes = (EmNode, StrongNode, SpanNode)
+
+    def __init__(self):
+        super(Detox, self).__init__()
+        self.root = Node("body")
+        self.node = self.root
+        self.grab = False
+        self.title = None
+        self.opentags = []
+
+    def handle_data(self, s):
+        if self.grab:
+            self._push(TextNode, s)
+            self._pop(TextNode)
+
+    def handle_title_start(self, attr):
+        self.grab = True
+        self.node = PNode()
+
+    def handle_title_end(self, attr):
+        self.title = self.node.flatten_content() \
+                              .split("|")[0] \
+                              .capitalize() \
+                              .strip()
+        self.node = self.root
+        self.grab = False
 
     def handle_div_start(self, attr):
-        if not self.article:
-            return
-        if "class" in attr and "content" in attr["class"].split():
-            self.content = []
+        classes = frozenset(attr.get("class", "").split())
+        if "field-name-body" in classes and "field-type-text-with-summary" in classes:
             self.grab = True
 
     def handle_div_end(self, attr):
-        if "class" in attr and "content" in attr["class"].split():
+        classes = frozenset(attr.get("class", "").split())
+        if "field-name-body" in classes and "field-type-text-with-summary" in classes:
             self.grab = False
 
-    def handle_title_start(self, attr):
-        self.title = True
-
-    def handle_data(self, data):
-        if data and data.strip():
-            self.append(data)
-
-    def handle_p_start(self, attr):
-        self.in_paragraph = self.article
-        self.append("\n")
-        self.append("<p>")
-
-    def handle_p_end(self, attr):
-        if self.appending and self.content[-1] == "<p>":  # Avoid empty paragraphs
-            del self.content[-1]
-        else:
-            self.append("</p>")
-        self.in_paragraph = False
-
-    def handle_i_start(self, attr):
-        self.append("<em>")
-
-    def handle_i_end(self, attr):
-        if self.appending and self.content[-1] == "<em>":  # Avoid empty tags
-            del self.content[-1]
-        else:
-            self.append("</em>")
-
-    handle_em_start = handle_i_start
-    handle_em_end   = handle_i_end
-
-    def handle_b_start(self, attr):
-        self.append("<strong>")
-
-    def handle_b_end(self, attr):
-        if self.appending and self.content[-1] == "<strong>":  # Avoid empty tags
-            del self.content[-1]
-        else:
-            self.append("</strong>")
-
-    handle_strong_start = handle_b_start
-    handle_strong_end   = handle_b_end
-
-    def handle_img_start(self, attr):
-        if self.appending and "src" in attr:
-            imgname = attr["src"].split("/")[-1]
-            if "alt" not in attr:
-                if "title" in attr:
-                    attr["alt"] = attr["title"]
-                else:
-                    attr["alt"] = imgname
-
-            self.append("<!-- img: %s -->" % attr["src"])
-            self.append("<img src=\"img/%s\" alt=\"%s\"/>"
-                        % (imgname, attr["alt"]))
+    def handle_img_end(self, attr):
+        if self.grab and "src" in attr:
+            self.node.append(ImgNode(attr.get("src"), attr.get("alt", None)))
 
     def handle_br_start(self, attr):
-        if self.appending and self.content[-1] == "<br/>":
-            # Double-linebreak in some documents signals end of paragraph
-            del self.content[-1]
-            self.append("</p>")
+        if self.grab:
+            self.node.append(BrNode())
+
+    def handle_p_start(self, attr):
+        if self._push(PNode):
+            [self.handle_starttag(tag, ()) for tag in self.opentags]
+
+    def handle_p_end(self, attr):
+        if self.grab:
+            [self.handle_endtag(tag) for tag in self.opentags]
+            keep = bool(self.node.flatten_content())
+            self._pop(PNode)
+            if not keep:
+                self.node.pop()
+
+    def _push(self, nodeclass, *arg, **kw):
+        if self.grab:
+            node = nodeclass(*arg, **kw)
+            self.node.append(node)
+            assert node.parent == self.node
+            self.node = node
+            if nodeclass in self.inline_classes:
+                self.opentags.append(node.tagname)
+            return True
         else:
-            self.append("<br/>")
+            return False
 
-    def handle_blockquote_start(self, attr):
-        self.append("\n")
-        self.append("<blockquote>")
+    def _pop(self, nodeclass):
+        node = None
+        if self.grab:
+            assert isinstance(self.node, nodeclass)
+            if nodeclass in self.inline_classes:
+                assert self.opentags.pop() == self.node.tagname
+            node = self.node
+            self.node = self.node.parent
+        return node
 
-    def handle_blockquote_end(self, attr):
-        if len(self.content) and self.content[-1] == "<blockquote>":
-            del self.content[-1]
-        else:
-            self.append("</blockquote>")
+    def handle_em_start(self, attr): self._push(EmNode)
+    def handle_em_end  (self, attr): self._pop (EmNode)
+    handle_i_start = handle_em_start
+    handle_i_end   = handle_em_end
 
-    def handle_pre_start(self, attr):
-        self.append("\n")
-        self.append("<pre>")
+    def handle_strong_start(self, attr): self._push(StrongNode)
+    def handle_strong_end  (self, attr): self._pop (StrongNode)
+    handle_b_start = handle_strong_start
+    handle_b_end   = handle_strong_end
 
-    def handle_pre_end(self, attr):
-        if self.appending and self.content[-1] == "<pre>":
-            del self.content[-1]
-        else:
-            self.append("</pre>")
+    def handle_blockquote_start(self, attr): self._push(BlockquoteNode)
+    def handle_blockquote_end  (self, attr): self._pop (BlockquoteNode)
 
-    def handle_a_start(self, attr):
-        if "href" in attr and not attr["href"].startswith("#"):
-            self.append("<a href=\"%s\">" % attr["href"])
-
+    def handle_a_start(self, attr): self._push(ANode)
     def handle_a_end(self, attr):
-        if self.appending and self.content[-1].startswith("<a href="):
-            del self.content[-1]
-        else:
-            self.append("</a>")
-
-    def handle_charref(self, name):
-        self.append(charref_table.get(name, "&%s;" % name))
-
-    def handle_entityref(self, name):
-        self.append(entityref_table.get(name, "&%s;" % name))
+        node = self._pop(ANode)
+        if node:
+            href = attr.get("href", None)
+            if href:
+                if not href.startswith("http://"):
+                    href = None
+                elif not href.startswith("https://"):
+                    href = None
+            node.attr["href"] = href
 
 
 def cmd_chapter_links(argv):
@@ -256,23 +471,21 @@ def cmd_chapter_links(argv):
         print href
 
 
-def line_filter(line):
-    line = line.lower().strip()
-    return ("this article is part of the <strong>the memoir</strong> series." not in line
-        and "(this is chapter " not in line)
-
-
 def cmd_html_detox(argv):
     parser = Detox()
     if len(argv) and argv[0] == "no-images":
-        parser.handle_img_start = parser.handle_img_end = None
+        # FIXME: parser.handle_img_start = parser.handle_img_end = None
+        pass
 
-    [parser.feed(data) for data in sys.stdin]
-    print EPUB_CH_START % parser.title,
-    lines = "".join(parser.content).splitlines()
-    print "\n".join(filter(line_filter, lines[3:-2]))
+    [parser.feed(data.decode("utf-8")) for data in sys.stdin]
+
+    # Insert the title as <h1> at the beginning of the body
+    tree = parser.root.sanitized()
+    tree.insert(0, Node("h1", TextNode((parser.title,))))
+
+    print EPUB_CH_START % parser.title
+    print tree.flatten().encode("utf-8")
     print EPUB_CH_END
-
 
 def opf_toc_itemrefs(item_ids):
     items = ("<itemref idref=\"%s\" />" % i for i in item_ids)
@@ -287,7 +500,6 @@ _IMG_MIMETYPE = {
 }
 
 def opf_manifest(item_ids):
-    print >> sys.stderr, "item_ids:", item_ids
     items = ["<item id=\"%s\" href=\"%s.xhtml\" media-type=\"application/xhtml+xml\"/>"
              % (i, i) for i in item_ids]
 
