@@ -520,6 +520,22 @@ def ncx_nav_points(ids, titles):
     return "\n\t".join(items)
 
 
+def gen_id_hash(itemidlist):
+    from hashlib import sha512
+    sha = sha512()
+    with file(__file__, "rU") as f:
+        [sha.update(data) for data in f]
+
+    datadir = path.join(path.dirname(__file__), "data")
+    for itemid in itemidlist:
+        filepath = path.join(datadir, itemid + ".html")
+        if path.isfile(filepath):
+            with file(filepath, "rU") as f:
+                [sha.update(data) for data in f]
+
+    return sha.hexdigest()
+
+
 def cmd_expand_template(argv):
     if len(argv) != 1:
         raise SystemExit("Usage: xtool expand-template indexfile < in > out")
@@ -536,6 +552,7 @@ def cmd_expand_template(argv):
     expandvars = {
         "BOOK_TITLE"      : "The Memoir",
         "BOOK_AUTHOR"     : "Levi Asher",
+        "BOOK_ID_HASH"    : gen_id_hash(itemidlist),
         "OPF_MANIFEST"    : opf_manifest(itemidlist),
         "NCX_NAV_POINTS"  : ncx_nav_points(itemidlist, chaptitles),
         "OPF_TOC_ITEMREFS": opf_toc_itemrefs(itemidlist),

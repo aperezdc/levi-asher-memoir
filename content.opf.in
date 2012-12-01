@@ -4,8 +4,8 @@
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
 		<dc:title>$BOOK_TITLE</dc:title>
     <dc:language>en</dc:language>
-    <dc:identifier id="BookId" opf:scheme="ISBN">123456789X</dc:identifier>
-		<dc:creator opf:file-as="Austen, Jane" opf:role="aut">$BOOK_AUTHOR</dc:creator>
+    <dc:identifier id="BookId">$BOOK_ID_HASH</dc:identifier>
+		<dc:creator opf:file-as="$BOOK_AUTHOR" opf:role="aut">$BOOK_AUTHOR</dc:creator>
   </metadata>
 
   <manifest>
