@@ -1,6 +1,6 @@
-=================================
- Levin Asher memoir EPUB creator
-=================================
+================================
+ Levi Asher memoir EPUB creator
+================================
 
 This is a Makefile and supporting tools and files to assemble an EPUB from
 the online articles that conform Levi Asher's memoirs. The original texts
@@ -19,7 +19,7 @@ Requirements
 ============
 
 If you are running a decent Unix-like system, most likely you will already
-have those (or easilt available in your package manager):
+have those (or easily available in your package manager):
 
 * GNU Make.
 * ``wget``
